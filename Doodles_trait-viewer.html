@@ -106,11 +106,59 @@ button, [role="button"] { -webkit-appearance: none; appearance: none; }
   justify-content:center;
 }
 
-.id-search{ display:grid; gap:6px; margin-bottom:10px }
-.id-search label{ font-size:12px; color:var(--muted) }
-.control{ width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:#0d1016; color:var(--text); font-size:13px }
+/* --- Inputs: ID + Global Search (versione definitiva) --- */
 
-.filters{ display:grid; grid-template-columns: 1fr; gap:12px }
+/* contenitore ID */
+.id-search{ display:grid; gap:6px; margin-bottom:10px }
+
+/* stile base degli input */
+.control{
+  width:100%;
+  padding:8px 10px;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background:#0d1016;
+  color:var(--text);
+  font-size:13px; /* base */
+}
+
+/* in sidebar vogliamo testo a 16px (niente zoom iOS) */
+.sidebar .control{ font-size:16px; }
+.sidebar .control::placeholder{ font-size:inherit; opacity:.75; }
+
+/* wrapper per avere la X interna */
+.input-clear{ position:relative; }
+.input-clear .control{ padding-right:34px; } /* spazio per la X */
+
+/* bottone "clear" minimal, senza cerchio; X SVG centrata */
+.clear-btn{
+  position:absolute; right:8px; top:50%; transform:translateY(-50%);
+  width:32px; height:32px; padding:0;
+  border:0; background:transparent; border-radius:0;
+  display:none; cursor:pointer;
+}
+.clear-btn.show{ display:block; }
+
+.clear-btn::before{
+  content:"";
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:14px; height:14px;
+  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><path d="M1 1L13 13M13 1L1 13" stroke="%23b8bec9" stroke-width="2" stroke-linecap="round"/></svg>')
+             no-repeat center center;
+  opacity:.8;
+}
+.clear-btn:hover::before{ opacity:1; }
+.clear-btn:focus-visible{ outline:2px solid #2b62ff; outline-offset:2px; border-radius:6px; }
+
+  /* --- Global trait search --- */
+.traits-search{
+  display:flex; align-items:center; gap:10px;
+  margin: 8px 0 12px 0;
+}
+
+
+/* Utility per nascondere gruppi/label */
+.is-hidden{ display:none !important; }
 
 /* summary con contatore a destra */
 summary{
@@ -276,13 +324,23 @@ details .filter-search.control { margin-bottom: 12px; }
       <!-- Sidebar -->
       <aside class="panel sidebar">
         <div class="sticky">
-          <!-- ID search -->
-          <div class="id-search">
-            <label for="idSearch">Filter by ID</label>
-            <input id="idSearch" class="control" type="text" inputmode="numeric"
-                   placeholder="8929" />
+          <!-- ID -->
+          <div class="id-search input-clear">
+            <input id="idSearch" class="control" type="text"
+                   inputmode="numeric" placeholder="8929" autocomplete="off">
+            <button type="button" class="clear-btn" data-clear-for="idSearch" aria-label="Pulisci"></button>
+          </div>
+          
+          <!-- Global trait search -->
+          <div class="traits-search input-clear">
+            <input id="traitSearch" class="control" type="text"
+                   inputmode="search" enterkeyhint="search"
+                   placeholder="green mullet" autocomplete="off" autocapitalize="off" autocorrect="off">
+            <button type="button" class="clear-btn" data-clear-for="traitSearch" aria-label="Pulisci"></button>
           </div>
 
+
+          
           <!-- Trait filters -->
           <div class="filters-scroll">
             <div class="filters" id="filters"><!-- dynamic --></div>
@@ -366,7 +424,9 @@ let TRAITS = {};               // { trait: Set(values) }
 let VALUE_COUNTS = {};         // { trait: { value: count } }
 let INDEX = {};                // { trait: { value: Set(ids) } }
 let TRAIT_BLOCKS = new Map();  // trait -> <details> node
+let GLOBAL_QN = "";            // query normalizzata della ricerca globale tratti
 
+  
 let selected = {};             // { trait: Set(values) }
 let results = [];              // current filtered ids
 let page = 0, pageSize = 60;   // pagination
@@ -376,6 +436,8 @@ let io = null, ioBusy = false;
 // ID filter
 let idFilterRaw = '';
 let idFilterSet = null;
+
+function norm(s){ return String(s||"").toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').trim(); }
 
 /*** Utils ***/
 const IMG_TIMEOUT_MS = 2000;   // dopo 4s passa al gateway successivo
@@ -516,11 +578,18 @@ function makeTraitBlock(trait, values){
   wrap.appendChild(summary);
 
   const search = document.createElement('input');
-  search.type = 'search';
+  search.type = 'text'; // <- niente X blu nativa su iOS
   search.className = 'filter-search control';
   search.placeholder = 'Search…';
   search.setAttribute('data-trait', trait);
+  // opzionale, per UX:
+  search.setAttribute('inputmode','search');
+  search.setAttribute('enterkeyhint','search');
+  search.autocomplete = 'off';
+  search.autocapitalize = 'off';
+  search.spellcheck = false;
   wrap.appendChild(search);
+
 
   const valuesEl = document.createElement('div');
   valuesEl.className = 'values';
@@ -590,68 +659,97 @@ function renderActiveChips(){
   }
 }
 
-/*** Dynamic availability (always on) ***/
 function updateAvailability(){
   const selectedTraits = Object.keys(selected);
+
+  // OR per ciascun tratto selezionato
   const unions = {};
-  for(const t of selectedTraits){
+  for (const t of selectedTraits){
     let u = null;
-    for(const v of selected[t]){
-      const s = INDEX[t]?.[v]; if(!s) continue;
+    for (const v of selected[t]){
+      const s = INDEX[t]?.[v]; if (!s) continue;
       u = unionSets(u, s);
     }
     unions[t] = u || new Set();
   }
 
-  for(const trait of Object.keys(TRAITS)){
+  for (const trait of Object.keys(TRAITS)){
+    // AND tra gli altri tratti
     const otherSets = [];
-    for(const t of selectedTraits){
-      if(t===trait) continue;
+    for (const t of selectedTraits){
+      if (t === trait) continue;
       otherSets.push(unions[t]);
     }
     let pool = intersectMany(otherSets); // null = all
 
-    if(idFilterSet !== null){
-      if(idFilterSet.size===0){ pool = new Set(); }
-      else { pool = pool ? intersectSets(pool, idFilterSet) : new Set(idFilterSet); }
+    // filtro per ID
+    if (idFilterSet !== null){
+      if (idFilterSet.size === 0){
+        pool = new Set();
+      } else {
+        pool = pool ? intersectSets(pool, idFilterSet) : new Set(idFilterSet);
+      }
     }
 
     const block = TRAIT_BLOCKS.get(trait);
-    if(!block) continue;
+    if (!block) continue;
+
     const labels = block.querySelectorAll('.values label');
 
-    let availableCount = 0; // quante opzioni di questo tratto sono selezionabili ora
+    // >>> [INSERIMENTO ESATTO] query locale normalizzata (UNA VOLTA, fuori dal loop)
+    const qLocalNorm = norm(block.querySelector('.filter-search')?.value || '');
+    // <<<
 
-    for(const lbl of labels){
+    let availableCount = 0; // opzioni attivabili (cnt>0 o già selezionate)
+    let visibleInGroup = 0; // opzioni VISIBILI dopo filtri testuali
+
+    for (const lbl of labels){
       const cb = lbl.querySelector('input[type="checkbox"]');
-      const val = cb.getAttribute('data-value');
-      const setVal = INDEX[trait]?.[val] || new Set();
-      const cnt = (pool===null) ? setVal.size : countIntersection(pool, setVal);
+      const valueKey = cb.getAttribute('data-value');
+      const setVal = INDEX[trait]?.[valueKey] || new Set();
 
+      const cnt = (pool === null) ? setVal.size : countIntersection(pool, setVal);
+
+      // aggiorna contatore singola voce
       const cntEl = lbl.querySelector('.count');
-      if(cntEl) cntEl.textContent = `(${cnt})`;
+      if (cntEl) cntEl.textContent = `(${cnt})`;
 
       const isChecked = cb.checked;
-      const impossible = (!isChecked && cnt===0);
+      const impossible = (!isChecked && cnt === 0);
 
       lbl.dataset.impossible = impossible ? '1' : '0';
       cb.disabled = impossible;
       lbl.classList.toggle('no-available', impossible);
 
-      // conteggio disponibili: se porta risultati o è già selezionata
       if (cnt > 0 || isChecked) availableCount++;
 
-      // filtro testo locale
-      const q = (block.querySelector('.filter-search')?.value || '').trim().toLowerCase();
-      const matchesSearch = !q || (lbl.dataset.value||'').includes(q);
-      lbl.style.display = (impossible || !matchesSearch) ? 'none' : '';
+      // --- filtro testo: GLOBALE + LOCALE (entrambi inclusivi)
+      const valText = lbl.dataset.value || '';
+      const matchesGlobal = !GLOBAL_QN  || norm(valText).includes(GLOBAL_QN);
+      const matchesLocal  = !qLocalNorm || norm(valText).includes(qLocalNorm);
+
+      const show = !impossible && matchesGlobal && matchesLocal;
+      lbl.style.display = show ? '' : 'none';
+      if (show) visibleInGroup++;
     }
 
-    // aggiorna "(N)" nel summary del tratto
+    // nascondi l’intero gruppo se non resta nulla visibile
+    block.classList.toggle('is-hidden', visibleInGroup === 0);
+
+    // badge nel summary:
+    // - SENZA ricerca testuale: (availableCount)
+    // - CON ricerca (globale o locale): (visibili/totali)
     const sc = block.querySelector('.sum-count');
-    if (sc) sc.textContent = `(${availableCount})`;
+    if (sc){
+      const totalInGroup = labels.length;
+      const textFilterOn = !!GLOBAL_QN || !!qLocalNorm;
+      sc.textContent = textFilterOn ? `(${visibleInGroup}/${totalInGroup})`
+                                    : `(${availableCount})`;
+    }
   }
 }
+
+
 
 /*** Filtering ***/
 function applyFilters(){
@@ -771,6 +869,12 @@ function resetFilters(){
   idFilterSet = null;
   idSearchEl.value = '';
   for(const cb of filtersEl.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
+  // pulisci ricerca globale
+  const traitSearchEl = document.getElementById('traitSearch');
+  if (traitSearchEl) traitSearchEl.value = '';
+  GLOBAL_QN = '';
+  updateAvailability();
+
   applyFilters();
   setupInfiniteScroll();  // attiva l’infinite scroll
 
@@ -826,18 +930,30 @@ function setupInfiniteScroll(){
   
 // Per-trait search (always hides impossible)
 filtersEl.addEventListener('input', e=>{
-  if(e.target && e.target.matches('.filter-search')){
-    const q = e.target.value.trim().toLowerCase();
+  if (e.target && e.target.matches('.filter-search')){
+    const q = norm(e.target.value);
     const wrap = e.target.closest('details');
     const labels = wrap.querySelectorAll('.values label');
-    for(const lbl of labels){
-      const val = lbl.dataset.value || '';
+
+    for (const lbl of labels){
+      const val = norm(lbl.dataset.value || '');
       const impossible = lbl.dataset.impossible === '1';
       const show = (!q || val.includes(q)) && !impossible;
       lbl.style.display = show ? '' : 'none';
     }
+
+    // nascondi il gruppo se nessuna label è visibile
+    let visibleInGroup = 0;
+    for (const lbl of labels){
+      if (lbl.style.display !== 'none') visibleInGroup++;
+    }
+    wrap.classList.toggle('is-hidden', visibleInGroup === 0);
+
+    // riallinea rispetto alla ricerca GLOBALE
+    updateAvailability();
   }
 });
+
 
 // Checkbox change
 filtersEl.addEventListener('change', e=>{
@@ -852,11 +968,23 @@ filtersEl.addEventListener('change', e=>{
   }
 });
 
-// ID search
+
+// ID search (solo numeri, virgole, spazi e trattini)
 idSearchEl.addEventListener('input', ()=>{
+  const v = idSearchEl.value;
+  let s = v.replace(/\D+/g, ''); // solo cifre
+  // normalizza trattini/virgole ripetuti e spazi multipli
+  s = s.replace(/-{2,}/g, '-').replace(/,{2,}/g, ',').replace(/\s{2,}/g, ' ');
+  if (s !== v) {
+    const pos = idSearchEl.selectionStart || s.length;
+    idSearchEl.value = s;
+    // prova a mantenere il caret più o meno in posizione
+    try { idSearchEl.setSelectionRange(pos - (v.length - s.length), pos - (v.length - s.length)); } catch {}
+  }
   parseIdQuery(idSearchEl.value);
   applyFilters();
 });
+
 
 // Active chip remove
 activeChipsEl.addEventListener('click', (e)=>{
@@ -888,6 +1016,24 @@ activeChipsEl.addEventListener('click', (e)=>{
 
 // Pagination + reset
 resetBtn.addEventListener('click', resetFilters);
+// --- clear buttons inside inputs (iOS-safe) ---
+function wireClear(inputId, afterClear){
+  const inp = document.getElementById(inputId);
+  const btn = document.querySelector(`[data-clear-for="${inputId}"]`);
+  if(!inp || !btn) return;
+
+  const toggle = () => btn.classList.toggle('show', !!inp.value);
+  inp.addEventListener('input', toggle);
+
+  btn.addEventListener('click', () => {
+    inp.value = '';
+    inp.focus();
+    inp.dispatchEvent(new Event('input', { bubbles:true })); // trigga i tuoi listener
+    if (afterClear) afterClear();
+  });
+
+  toggle(); // stato iniziale
+}
 
 
 /*** Init ***/
@@ -898,6 +1044,25 @@ resetBtn.addEventListener('click', resetFilters);
   enableAccordion();      // una sola sezione aperta
   loadFromURL();
   applyFilters();         // popola griglia + contatori (opzioni e summary)
+  // --- clear buttons hook (iOS/PWA friendly)
+  wireClear('traitSearch', () => { GLOBAL_QN = ''; updateAvailability(); });
+  wireClear('idSearch');
+  // --- Global trait search wiring ---
+  const traitSearchEl = document.getElementById('traitSearch');
+  let tSearch = 0;
+  
+  function applyGlobalSearch(){
+    GLOBAL_QN = norm(traitSearchEl.value);
+    updateAvailability();
+  }
+  
+  if (traitSearchEl){
+    traitSearchEl.addEventListener('input', ()=>{
+      clearTimeout(tSearch);
+      tSearch = setTimeout(applyGlobalSearch, 120);
+    });
+  }
+  
 })();
 </script>
   
