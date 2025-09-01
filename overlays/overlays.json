@@ -1,0 +1,102 @@
+{
+  "default": "mello",
+  "items": [
+    {
+      "id": "mello",
+      "name": "Mello",
+      "author": "ARB8i",
+      "authorHandle": "robottiandrea",
+      "badge": "NEW",
+      "badgeColor": "#FFFF",
+      "file": "Overlay_Mello.svg",
+      "thumb": "thumbs/mello.png",
+      "skinId": "Skin_fill",
+      "sleeveId": "Sleeve_fill",
+      "oopsTraits": ["balloon", "popsicle", "cat"],
+      "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
+     },
+      {
+        "id": "popcorn",
+        "name": "Popcorn",
+        "author": "ARB8i",
+        "authorHandle": "robottiandrea",
+        "authorUrl": "https://x.com/robottiandrea",
+        "badge": "NEW",
+        "badgeColor": "#FFFF",
+        "file": "Overlay_Popcorn.svg",
+        "thumb": "thumbs/popcorn.png",
+        "sleeveId": "Sleeve_fill",
+        "skinId": "Skin_fill",
+        "oopsTraits": ["balloon", "popsicle", "cat"],
+        "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
+      },
+        {
+          "id": "Italian_Pinch",
+          "name": "Eh?!",
+          "author": "ARB8i",
+          "authorHandle": "robottiandrea",
+          "authorUrl": "https://x.com/robottiandrea",
+          "badge": "NEW",
+          "badgeColor": "#FFFF",
+          "file": "Overlay_Italian_Pinch.svg",
+          "thumb": "thumbs/italian_pinch.png",
+          "sleeveId": "Sleeve_fill",
+          "skinId": "Skin_fill",
+          "oopsTraits": ["balloon", "popsicle", "cat"],
+          "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
+        },
+          {
+            "id": "Rainbow_Mug",
+            "name": "Rainbow Mug",
+            "author": "ARB8i",
+            "authorHandle": "robottiandrea",
+            "authorUrl": "https://x.com/robottiandrea",
+            "badge": "NEW",
+            "badgeColor": "#FFFF",
+            "file": "Overlay_Rainbow_Mug.svg",
+            "thumb": "thumbs/rainbow_mug.png",
+            "sleeveId": "Sleeve_fill",
+            "skinId": "Skin_fill",
+            "oopsTraits": ["balloon", "popsicle", "cat"],
+            "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
+          },
+            {
+              "id": "Mc_Fries",
+              "name": "Mc Fries",
+              "author": "ARB8i",
+              "authorHandle": "robottiandrea",
+              "authorUrl": "https://x.com/robottiandrea",
+              "badge": "NEW",
+              "badgeColor": "#FFFF",
+              "file": "Overlay_Mc_Fries.svg",
+              "thumb": "thumbs/Mc_fries.png",
+              "sleeveId": "Sleeve_fill",
+              "skinId": "Skin_fill",
+              "oopsTraits": ["balloon", "popsicle", "cat"],
+              "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
+            },
+              {
+                "id": "Gamepad",
+                "name": "Gamepad",
+                "author": "ARB8i",
+                "authorHandle": "robottiandrea",
+                "authorUrl": "https://x.com/robottiandrea",
+                "badge": "NEW",
+                "badgeColor": "#FFFF",
+                "file": "Overlay_Gamepad.svg",
+                "thumb": "thumbs/gamepad.png",
+                "sleeveId": "Sleeve_fill",
+                "skinId": "Skin_fill",
+                "oopsTraits": ["balloon", "popsicle", "cat"],
+                "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
+              }
+            ]
+          }
+  
+  
+  
+
+
+
+
+

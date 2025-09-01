@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Doodles Overlays — Gallery</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&display=swap" rel="stylesheet">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0f1115">
+
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Doodles">
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  }
+</script>
+
+<style>
+  :root{ --bg:#0f1115; --card:#171a21; --text:#eef2ff; --muted:#9aa3b2; --acc:#8ab4ff; --border:#232938; }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--bg); color:var(--text); font:15px/1.45 'Fredoka',system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:1100px; margin:0 auto; padding:28px}
+
+  /* centratura SOLO del blocco titolo+descrizione */
+  .hero{ text-align:center; margin:8px 0 18px }
+  .hero h1 {
+    margin: 0 0 6px;
+    font-size: clamp(26px, 3vw, 36px); /* circa il doppio di p */
+    font-weight: 600;
+  }
+  
+  .hero p {
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(13px, 1.5vw, 18px);
+    line-height: 1.35;
+  }
+
+
+  .toolbar{display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:end; margin:12px 0 18px}
+  .toolbar .field{display:flex; gap:8px; align-items:center}
+  .toolbar input{padding:10px 12px; border-radius:12px; border:1px solid var(--border); background:#0d1016; color:var(--text); width:220px}
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(256px, 256px));
+    gap:18px;
+    justify-content: center; /* <-- centra le colonne dentro il contenitore */
+  }
+  .grid{ justify-items: center; } /* opzionale */
+  .card{background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.25); position:relative; transition:transform .08s ease, box-shadow .08s ease}
+  .card:hover{transform:translateY(-2px); box-shadow:0 16px 36px rgba(0,0,0,.35)}
+  .thumb{position:relative; aspect-ratio:1/1; background:#0d1016}
+  .thumb img{width:100%; height:100%; object-fit:cover; display:block}
+  .badge{position:absolute; top:8px; left:8px; padding:4px 8px; border-radius:10px; font-size:11px; font-weight:600; background:#fff;color:#0F1116; }
+  .titlebar{padding:10px 12px; border-top:1px solid var(--border); background:linear-gradient(0deg, rgba(0,0,0,.45), rgba(0,0,0,.15))}
+  .name{font-size:15px; font-weight:600}
+  .by{font-size:12px; color:var(--muted)}
+  a.cardlink{position:absolute; inset:0; display:block; text-decoration:none; color:inherit}
+  .empty{opacity:.8; text-align:center; border:1px dashed var(--border); border-radius:12px; padding:18px}
+
+  /* Firma */
+.credits {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  text-align: center;
+  font-family: 'Fredoka', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  font-weight: 600;
+}
+
+/* rendi riutilizzabile lo shine anche fuori dal footer */
+.credits .shine, .navchip .shine{
+  display:inline-block;
+  background: linear-gradient(120deg, rgba(192,192,192,.85) 40%, #fff 50%, rgba(192,192,192,.85) 60%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 8s infinite linear;
+}
+@keyframes shimmer {
+  0% { background-position:-200% 0; }
+  100% { background-position:200% 0; }
+}
+
+
+/* barra sticky che occupa spazio e centra il chip */
+.navchip-bar{
+  position: sticky;
+  top: calc(12px + env(safe-area-inset-top)); /* sicuro anche con notch */
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+/* puoi riusare le tue regole .navchip già messe;
+   se non le hai, queste vanno bene: */
+.navchip{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 14px; border-radius:999px;
+  background: color-mix(in oklab, var(--card) 85%, transparent);
+  border:1px solid var(--border);
+  backdrop-filter: blur(8px);
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
+  font:600 14px/1 'Fredoka', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  color:var(--text); text-decoration:none; white-space:nowrap;
+  transition:border-color .15s ease, color .15s ease, transform .05s ease;
+}
+.navchip:hover{ color:var(--acc); border-color:var(--acc); }
+.navchip:active{ transform: translateY(1px); }
+:root{
+  --sheen-width: 56px;     /* fascia un po’ più larga = più morbida */
+  --sheen-alpha: .18;      /* meno brillantezza */
+  --sheen-angle: -14deg;   /* inclinazione più dolce */
+  --sheen-from: -120%;     /* entra poco fuori a sinistra */
+  --sheen-to: 220%;        /* esce poco fuori a destra */
+  --sheen-dur: 5.2s;       /* passata più lenta */
+  --sheen-delay: 1.2s;     /* piccola pausa tra le passate */
+}
+
+.navchip{ position:relative; overflow:hidden; }
+
+</style>
+</head>
+<body>
+  <div class="navchip-bar">
+    <a class="navchip" href="./Doodles_trait-viewer.html" title="Apri Trait Viewer">
+      <span class="shine">Trait Viewer</span>
+    </a>
+  </div>
+  
+  <main class="wrap">
+    <header class="hero">
+      <h1>ARB8i 💛 Lab</h1>
+      <p>Pick a vibe! Overlay the fun!</p>
+    </header>
+
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none">Nessun overlay nel manifest.</div>
+  </main>
+
+<script>
+const GRID = document.getElementById('grid');
+const EMPTY = document.getElementById('empty');
+let overlays = null;
+
+function cardHTML(item){
+  const href = new URL('editor.html', location.href);
+  href.searchParams.set('overlay', item.id);
+
+  const thumb = item.thumb || `thumbs/${item.id}.png`;
+  const badge = item.badge ? `<div class="badge" style="${item.badgeColor?`background:${item.badgeColor}`:''}">${item.badge}</div>` : '';
+  const by = item.author ? `<div class="by">by ${item.author}</div>` : '';
+
+  return `
+  <article class="card">
+    <div class="thumb">
+      ${badge}
+      <img loading="lazy" src="${thumb}" alt="${item.name||item.id}" />
+    </div>
+    <div class="titlebar">
+      <div class="name">${item.name||item.id}</div>
+      ${by}
+    </div>
+    <a class="cardlink" href="${href.toString()}"></a>
+  </article>`;
+}
+
+function render(){
+  if(!overlays || !overlays.items || overlays.items.length===0){
+    GRID.innerHTML = '';
+    if (EMPTY) EMPTY.style.display = '';
+    return;
+  }
+  if (EMPTY) EMPTY.style.display = 'none';
+  GRID.innerHTML = overlays.items.map(cardHTML).join('');
+}
+
+async function loadManifest(){
+  for (const url of ['./overlays/overlays.json','./overlays.json']){
+    try{ const r = await fetch(url); if(r.ok){ overlays = await r.json(); return; } }catch{}
+  }
+  overlays = { items: [] };
+}
+
+loadManifest().then(render).catch(()=>{ overlays = { items: [] }; render(); });
+</script>
+
+</body>
+
+<footer class="credits">
+  <a href="https://x.com/robottiandrea" target="_blank" rel="noopener" class="shine">
+    made by @robottiandrea
+  </a>
+</footer>
+
+
+
+</html>
