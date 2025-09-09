@@ -100,13 +100,18 @@
   .by{ font-size:12px; color:var(--muted) }
   a.cardlink{ position:absolute; inset:0; display:block; text-decoration:none; color:inherit }
   .empty{ opacity:.8; text-align:center; border:1px dashed var(--border); border-radius:12px; padding:18px }
-
+  
+  :root{ --navchip-h: 44px; }
   /* nav chip sticky (solo gallery) */
   .navchip-bar{
-    position:sticky;
-    top:calc(12px + env(safe-area-inset-top));
-    z-index:9999;
-    display:flex; justify-content:center; padding:4px 0;
+    position: fixed;                          /* ← era sticky/flex */
+    top: calc(env(safe-area-inset-top) + 12px);
+    left: 0;                                  /* ← ancora ai bordi */
+    right: 0;
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    padding: 4px 0;
   }
   .navchip{
     display:inline-flex; align-items:center; gap:8px;
@@ -124,7 +129,10 @@
   }
   .navchip:hover{ color:var(--acc); border-color:var(--acc); }
   .navchip:active{ transform: translateY(1px); }
-
+  /* spinge i contenuti sotto la barra (titolo non si sovrappone) */
+  .wrap{
+    padding-top: calc(env(safe-area-inset-top) + 12px + var(--navchip-h));
+  }
 
   
 /* Runner di luce che percorre il bordo (trigger: .grid.highlight) */
