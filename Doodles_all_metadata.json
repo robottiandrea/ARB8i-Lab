@@ -32880,8 +32880,8 @@
         "value": "holographic cat"
       }
     ],
-    "Skin_colors": "Gradient 2",
-    "Sleeve_colors": "Gradient 2"
+    "Skin_colors": "Holo",
+    "Sleeve_colors": "Holo"
   },
   "1100": {
     "image": "ipfs://QmUWzTK9Avwae1fhVwuDW4o7g4ViCth6NEiEyHEsmkp2WL",
@@ -82451,7 +82451,7 @@
       }
     ],
     "Skin_colors": "Purple 1",
-    "Sleeve_colors": "Gradient 2"
+    "Sleeve_colors": "Holo"
   },
   "2762": {
     "image": "ipfs://QmeqrXiZ88qweAZxaYcQuDvhjNPRh4eiUhr9mqfkxU6ska",
@@ -98667,7 +98667,7 @@
       }
     ],
     "Skin_colors": "Skin 3",
-    "Sleeve_colors": "Gradient 2"
+    "Sleeve_colors": "Holo"
   },
   "3306": {
     "image": "ipfs://QmP3XnVDeZy1E1vDj6tpohG9RHVhA4onj32o7oNCZLciak",
@@ -121789,7 +121789,7 @@
       }
     ],
     "Skin_colors": "Light Blue 1",
-    "Sleeve_colors": "Gradient 2"
+    "Sleeve_colors": "Holo"
   },
   "4080": {
     "image": "ipfs://Qmf5hpdQgzvVmc4hmWCP9xK4zAM2gbYNdMnVYyuqB8jmZM",
