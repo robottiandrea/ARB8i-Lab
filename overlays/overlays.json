@@ -148,9 +148,25 @@
                         "skinId": "Skin_fill",
                         "oopsTraits": ["balloon", "popsicle", "cat"],
                         "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
-                      }
-                    ]
-                  }
+                      },
+						  {
+							"id": "FlipTheBirb",
+							"name": "Flip The Birb",
+							"author": "Captain Roops",
+							"authorHandle": "roopsNFT",
+							"authorUrl": "https://x.com/roopsNFT",
+							"badge": "NEW",
+							"badgeColor": "#FFFF",
+							"file": "Overlay_FlipTheBirb.svg",
+							"variants": ["puffer"],
+							"thumb": "thumbs/FlipTheBirb.png",
+							"sleeveId": "Sleeve_fill",
+							"skinId": "Skin_fill",
+							"oopsTraits": ["balloon", "popsicle", "cat"],
+							"oopsMessage": "Pretty sure your dood doesn’t have any hands!"
+						  }
+						]
+					  }
         
       
       

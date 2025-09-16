@@ -12,10 +12,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
 
+<!-- iOS PWA: OBBLIGATORI su OGNI pagina -->
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Doodles">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
 
 <!-- libreria condivisa (normalizeId, wireClear, createIdPreview) -->
 <script src="./scripts/common.js"></script>
@@ -27,6 +30,28 @@
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   }
+</script>
+<script>
+  (function () {
+    const isStandalone =
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      (navigator.standalone === true); // iOS legacy
+
+    if (!isStandalone) return;
+
+    // TUTTI i link interni restano nella PWA (niente Safari esterno)
+    addEventListener('click', function (e) {
+      const a = e.target.closest('a[href]');
+      if (!a || a.dataset.external === '1') return;
+
+      const url = new URL(a.getAttribute('href'), location.href);
+      if (url.origin !== location.origin) return; // esterno: lascio stare
+
+      e.preventDefault();
+      // usa percorso relativo per evitare edge-case su iOS
+      location.assign(url.pathname + url.search + url.hash);
+    }, { capture: true });
+  })();
 </script>
 
 <style>
@@ -123,7 +148,7 @@
       
         <p class="sub" style="margin:6px 0 0">
           Missing your Doodle ID?
-          <a id="viewerLink" class="back shimmer idhelp" href="./Doodles_trait-viewer.html">Find it here!</a>
+          <a id="viewerLink" class="back shimmer idhelp" href="./Doodles_trait-viewer.html?source=editor&overlay=<OVERLAY_ID>">Find it here!</a>
         </p>
       </div>
 
@@ -146,7 +171,7 @@
     
     <!-- Footer fuori dal frame -->
     <div id="madeBy" class="footer-madeby" style="display:none">
-      <a id="madeByLink" class="shimmer madeby-link" href="#" target="_blank" rel="noopener">
+     <a id="madeByLink" class="shimmer madeby-link" href="#" target="_blank" rel="noopener" data-external="1">
         made by&nbsp;<span id="mbName">author</span><span id="mbSep">–</span><span id="mbHandle">@handle</span>
       </a>
     </div>
@@ -193,6 +218,9 @@ const mbName = $('#mbName');
 const mbHandle = $('#mbHandle');
 const mbSep = $('#mbSep');
 const exBadge = document.querySelector('#exampleBadge');
+/* ===== Overlay variants (semplice) ===== */
+// Livelli “controllati” dalla variante (gli altri non vengono toccati)
+const CONTROLLED_LAYERS = ['Outline','Sleeve_fill','Skin_fill','Swadow_fill'];
 
 
 const HAD_ID_AT_LOAD = new URLSearchParams(location.search).has('id');
@@ -394,9 +422,38 @@ async function loadMaps(){
   if(!NAME_TO_HEX){ const r=await fetch('./Corrispondenze_Nome_Hex.csv'); if(!r.ok) throw new Error('CSV not found'); NAME_TO_HEX=parseCsv(await r.text()); }
   if(!META){ const r=await fetch('./Doodles_all_metadata.json'); if(!r.ok) throw new Error('Metadata JSON not found'); META=await r.json(); }
 }
+// **INIZIO INSERIMENTO 2 – helpers varianti**
+function cssEscapeCompat(str){
+  return (window.CSS && CSS.escape) ? CSS.escape(str) : String(str).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
+// Rende visibile SOLO il nodo con id targetId, nasconde gli omonimi con suffisso
+function showOnlyId(svgRoot, baseId, variant){ 
+  const targetId = variant ? `${baseId}_${variant}` : baseId;
+  const all = [
+    baseId, 
+    `${baseId}_puffer`,
+    `${baseId}_fleece`
+  ];
+  all.forEach(id => {
+    const el = svgRoot.querySelector('#' + cssEscapeCompat(id));
+    if (!el) return;
+    el.style.setProperty('display', (id === targetId) ? '' : 'none', 'important');
+  });
+}
+
+// Se esiste il nodo con suffisso variante, usa quello, altrimenti il base
+function resolveVariantId(svgRoot, baseId, variant){
+  if (variant){
+    const vId = `${baseId}_${variant}`;
+    if (svgRoot.querySelector('#' + cssEscapeCompat(vId))) return vId;
+  }
+  return baseId;
+}
+// **FINE INSERIMENTO 2 – helpers varianti**
 
 /* ===== Compose: base + overlay → dataURL ===== */
-async function composeDataUrl(baseBlob, cfg, sleeveSpec, skinSpec){
+async function composeDataUrl(baseBlob, cfg, sleeveSpec, skinSpec, variant){
   const r = await fetch(`./overlays/${cfg.file}`);
   if(!r.ok) throw new Error(`Overlay not found: ${cfg.file}`);
   const svgText = await r.text();
@@ -419,8 +476,29 @@ async function composeDataUrl(baseBlob, cfg, sleeveSpec, skinSpec){
   svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '0 0 1800 1800');
   svg.setAttribute('preserveAspectRatio','xMidYMid meet');
 
-  const sleeveId = cfg.sleeveId || 'Sleeve_fill';
-  const skinId   = cfg.skinId   || 'Skin_fill';
+// Attiva la variante solo se l'item dichiara variants e se la variante è richiesta
+const declared = Array.isArray(cfg.variants) ? cfg.variants.map(v=>String(v).toLowerCase()) : [];
+const activeVariant = (variant && declared.includes(variant)) ? variant : null;
+
+// Mostra/occulta le versioni variant dei livelli controllati (gli altri layer non si toccano)
+CONTROLLED_LAYERS.forEach(baseId => {
+  // Se non c'è variante attiva, lascia tutto com'è (mostra il base)
+  if (!activeVariant) {
+    showOnlyId(svg, baseId, null);
+  } else {
+    // Prova a mostrare il livello con suffisso; se non esiste, ricade sul base
+    const preferId = `${baseId}_${activeVariant}`;
+    const hasVariant = !!svg.querySelector('#' + cssEscapeCompat(preferId));
+    showOnlyId(svg, baseId, hasVariant ? activeVariant : null);
+  }
+});
+
+// Questi ID (skin/sleeve) servono per applicare i colori a livello giusto (con o senza suffisso)
+const baseSleeveId = cfg.sleeveId || 'Sleeve_fill';
+const baseSkinId   = cfg.skinId   || 'Skin_fill';
+const sleeveId = resolveVariantId(svg, baseSleeveId, activeVariant);
+const skinId   = resolveVariantId(svg, baseSkinId,   activeVariant);
+
 
   // ==== helper gradient ====
   const NS = 'http://www.w3.org/2000/svg';
@@ -655,8 +733,20 @@ async function openImage(){
     const nameSleeve = (row.Sleeve_colors || row.sleeve_colors || row.Sleeve || '').trim();
     const hexSkin   = NAME_TO_HEX[nameSkin];
     const hexSleeve = NAME_TO_HEX[nameSleeve];
+	
+	// **INIZIO INSERIMENTO 3 – scelta variante**
+	let variant = null; // default-only
+	const declared = Array.isArray(currentCfg?.variants) ? currentCfg.variants.map(v=>String(v).toLowerCase()) : [];
+	// priorità: puffer > fleece
+	if (declared.includes('puffer') && rowHasAnyNeedle(row, ['puffer'])) {
+	  variant = 'puffer';
+	} else if (declared.includes('fleece') && rowHasAnyNeedle(row, ['fleece'])) {
+	  variant = 'fleece';
+	}
+	// **FINE INSERIMENTO 3 – scelta variante**
 
-    const dataUrl = await composeDataUrl(baseBlob, currentCfg, hexSleeve, hexSkin);
+
+    const dataUrl = await composeDataUrl(baseBlob, currentCfg, hexSleeve, hexSkin, variant);
     imgEl.src = dataUrl;
     hideCenterPop();
 
@@ -769,13 +859,15 @@ function applyBadge(badgeEl, cfg){
     ovName.textContent = currentCfg.name || currentCfg.id;
     ovAuthor.textContent = currentCfg.author ? `by ${currentCfg.author}` : '';
 
-    // Link al Trait Viewer con overlay corrente
-    const viewerLink = document.getElementById('viewerLink');
-    if (viewerLink) {
-      const u = new URL('./Doodles_trait-viewer.html', location.href);
-      u.searchParams.set('overlay', currentCfg.id);
-      viewerLink.href = u.toString();
-    }
+    // Link al Trait Viewer con overlay corrente (relativo + source=editor)
+	const viewerLink = document.getElementById('viewerLink');
+	if (viewerLink) {
+	  const u = new URL('./Doodles_trait-viewer.html', location.href);
+	  u.searchParams.set('source', 'editor');       // <-- importante per il "ritorno"
+	  u.searchParams.set('overlay', currentCfg.id);
+	  viewerLink.setAttribute('href', u.pathname + u.search + u.hash); // <-- relativo
+	}
+
 
     // Badge overlay
     applyBadge(ovBadge, currentCfg);

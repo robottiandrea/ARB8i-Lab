@@ -13,16 +13,42 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
 
+<!-- iOS PWA: OBBLIGATORI su OGNI pagina -->
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Doodles">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
 
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   }
 </script>
+<script>
+  (function () {
+    const isStandalone =
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      (navigator.standalone === true); // iOS legacy
+
+    if (!isStandalone) return;
+
+    // TUTTI i link interni restano nella PWA (niente Safari esterno)
+    addEventListener('click', function (e) {
+      const a = e.target.closest('a[href]');
+      if (!a || a.dataset.external === '1') return;
+
+      const url = new URL(a.getAttribute('href'), location.href);
+      if (url.origin !== location.origin) return; // esterno: lascio stare
+
+      e.preventDefault();
+      // percorso relativo → evita edge case su iOS
+      location.assign(url.pathname + url.search + url.hash);
+    }, { capture: true });
+  })();
+</script>
+
   
 <style>
   :root{
@@ -263,7 +289,7 @@ details .filter-search.control { margin-bottom: 12px; }
           <!-- ID -->
           <div class="id-search input-clear">
             <input id="idSearch" class="control" type="text"
-                   inputmode="numeric" placeholder="8929" autocomplete="off">
+                   inputmode="numeric" pattern="\d{0,4}" maxlength="4" placeholder="8929" autocomplete="off">
             <button type="button" class="clear-btn" data-clear-for="idSearch" aria-label="Pulisci"></button>
           </div>
           
@@ -334,19 +360,54 @@ const idSearchEl = $('#idSearch');
 const activeWrapEl = $('#activeWrap');
 const activeChipsEl = $('#activeChips');
 
-// Salva meta-param e pulisci l'URL PRIMA che il viewer legga i filtri
-const QS = new URLSearchParams(location.search);
-const SOURCE_PARAM  = QS.get('source')  || '';  // "index" se arrivi dalla gallery
-const OVERLAY_PARAM = QS.get('overlay') || '';  // overlay noto se arrivi dall'editor
-const LAST_OVERLAY  = localStorage.getItem('lastOverlay') || '';
 
-// Ripulisci la barra (i filtri non devono “vedere” questi parametri)
-if (QS.has('source') || QS.has('overlay')) {
+// Meta-param dal querystring
+const QS = new URLSearchParams(location.search);
+const SOURCE_PARAM  = QS.get('source')  || '';   // "index" | "editor" | "editor_animator"
+const TAB_PARAM     = QS.get('tab')     || '';   // "overlays" | "animated"
+const OVERLAY_PARAM = QS.get('overlay') || '';   // overlay (editor statico)
+const COMP_PARAM    = QS.get('comp')    || '';   // comp (editor animato)
+
+// Stato persistito
+const LAST_OVERLAY = localStorage.getItem('lastOverlay') || '';
+let   LAST_COMP    = localStorage.getItem('lastComp')    || '';
+if (COMP_PARAM) { try { localStorage.setItem('lastComp', COMP_PARAM); LAST_COMP = COMP_PARAM; } catch {} }
+if (OVERLAY_PARAM) { try { localStorage.setItem('lastOverlay', OVERLAY_PARAM); } catch {} }
+
+// Pulisci la barra: questi param non devono finire tra i filtri
+if (QS.has('source') || QS.has('tab') || QS.has('overlay') || QS.has('comp')) {
   QS.delete('source');
+  QS.delete('tab');
   QS.delete('overlay');
+  QS.delete('comp');
   const q = QS.toString();
   history.replaceState(null, '', location.pathname + (q ? '?' + q : ''));
 }
+
+
+// Back dinamico e relativo (resta in-app)
+(function setBackLink(){
+  const back = document.querySelector('.back');
+  if (!back) return;
+
+  let u;
+  if (SOURCE_PARAM === 'index') {
+    u = new URL('./index.html', location.href);
+    if (TAB_PARAM) u.searchParams.set('tab', TAB_PARAM);
+  } else if (SOURCE_PARAM === 'editor') {
+    u = new URL('./editor.html', location.href);
+    const ov = OVERLAY_PARAM || localStorage.getItem('lastOverlay') || '';
+    if (ov) u.searchParams.set('overlay', ov);
+  } else if (SOURCE_PARAM === 'editor_animator') {
+    u = new URL('./editor_animator.html', location.href);
+    const comp = COMP_PARAM || localStorage.getItem('lastComp') || '';
+    if (comp) u.searchParams.set('comp', comp);
+  } else {
+    u = new URL('./index.html', location.href);
+  }
+
+  back.setAttribute('href', u.pathname + u.search + u.hash);
+})();
 
 
 /*** State ***/
@@ -434,24 +495,28 @@ async function copyTextToClipboard(text){
   }catch{ return false; }
 }
 
-/*** Parse ID filter ***/
-function parseIdQuery(raw){
-  const txt = String(raw||'').trim();
-  if(!txt){ idFilterRaw=''; idFilterSet=null; return; }
-  const parts = txt.split(/[,\s]+/).filter(Boolean);
-  const ids = new Set();
-  for(const p of parts){
-    const mR = p.match(/^(\d+)\-(\d+)$/);
-    if(mR){
-      let a = +mR[1], b = +mR[2];
-      if(a>b) [a,b] = [b,a];
-      for(let i=a;i<=b;i++) if(BY_ID.has(i)) ids.add(i);
-      continue;
-    }
-    if(/^\d+$/.test(p)){ const n=+p; if(BY_ID.has(n)) ids.add(n); }
+function setIdFilterFromSingle(raw){
+  // tieni SOLO cifre e al massimo 4
+  let s = String(raw || '').replace(/\D+/g, '').slice(0, 4);
+
+  // stato "nessun filtro" se vuoto
+  if (!s) {
+    idFilterRaw = '';
+    idFilterSet = null;
+    return;
   }
-  idFilterRaw = txt;
-  idFilterSet = ids.size ? ids : new Set();
+
+  idFilterRaw = s;
+  const n = parseInt(s, 10);
+
+  // sicurezza extra: fuori range => nessun risultato
+  if (!Number.isFinite(n) || n < 0 || n > 9999) {
+    idFilterSet = new Set(); // 0 risultati
+    return;
+  }
+
+  // se l'ID esiste nei dati → 1 risultato; altrimenti 0
+  idFilterSet = BY_ID.has(n) ? new Set([n]) : new Set();
 }
 
 /*** Load local metadata ***/
@@ -719,7 +784,6 @@ function updateSummary(){
   summaryEl.textContent = `${results.length} result${results.length===1?'':'s'}`;
 }
 
-/*** Render page ***/
 function renderPage(){
   const start = page*pageSize;
   const slice = results.slice(start, start+pageSize);
@@ -729,32 +793,74 @@ function renderPage(){
     const obj = BY_ID.get(id);
     if (!obj) continue;
     const urls = ipfsToUrls(obj.image);
-  
+
     const a = document.createElement('article');
     a.className = 'card';
-  
-    // Azione per-card basata sul contesto:
-    // - da index (source=index): torna in index con ?id=XXXX
-    // - con overlay noto (overlay=...): apri l'editor con overlay+id
-    const actionHTML = (() => {
-      if (SOURCE_PARAM === 'index') {
-        const u = new URL('./index.html', location.href);
-        u.searchParams.set('id', id);
-        u.searchParams.set('lock', '1');
-        return `<a class="open" href="${u.toString()}">Use this ID</a>`;
-      }
-      if (OVERLAY_PARAM || LAST_OVERLAY) {
-        const ov = OVERLAY_PARAM || LAST_OVERLAY;
-        const u = new URL('./editor.html', location.href);
-        u.searchParams.set('overlay', ov);
-        u.searchParams.set('id', id);
-        return `<a class="open" href="${u.toString()}">Cook it!</a>`;
-      }
 
-      return ''; // nessun bottone in altri casi
-    })();
+    // (lascia invariata la logica che già avevi)
+    function buildReturnURL(id){
+	  // 1) Rispetta SEMPRE la sorgente esplicita
+	  if (SOURCE_PARAM === 'editor'){                 // Static editor (overlay)
+		const ov = OVERLAY_PARAM || LAST_OVERLAY;
+		if (ov){
+		  const u = new URL('./editor.html', location.href);
+		  u.searchParams.set('overlay', ov);
+		  u.searchParams.set('id', id);
+		  u.searchParams.set('lock', '1');
+		  return { url: u.toString(), label: 'Cook it!' };
+		}
+	  }
 
-  
+	  if (SOURCE_PARAM === 'editor_animator'){        // Animated editor (comp)
+		const comp = COMP_PARAM || LAST_COMP;
+		if (comp){
+		  const u = new URL('./editor_animator.html', location.href);
+		  u.searchParams.set('comp', comp);
+		  u.searchParams.set('id', id);
+		  u.searchParams.set('lock', '1');
+		  return { url: u.toString(), label: 'Cook it!' };
+		}
+	  }
+
+	  if (SOURCE_PARAM === 'index'){                  // Torna alla gallery
+		const u = new URL('./index.html', location.href);
+		u.searchParams.set('id', id);
+		u.searchParams.set('lock', '1');
+		if (TAB_PARAM) u.searchParams.set('tab', TAB_PARAM);
+		return { url: u.toString(), label: 'Use this ID' };
+	  }
+
+	  // 2) Nessuna sorgente esplicita: fallback deterministico
+	  //    Prima prova overlay (static), poi comp (animated)
+	  if (OVERLAY_PARAM || LAST_OVERLAY){
+		const ov = OVERLAY_PARAM || LAST_OVERLAY;
+		const u = new URL('./editor.html', location.href);
+		u.searchParams.set('overlay', ov);
+		u.searchParams.set('id', id);
+		u.searchParams.set('lock', '1');
+		return { url: u.toString(), label: 'Cook it!' };
+	  }
+
+	  if (COMP_PARAM || LAST_COMP){
+		const comp = COMP_PARAM || LAST_COMP;
+		const u = new URL('./editor_animator.html', location.href);
+		u.searchParams.set('comp', comp);
+		u.searchParams.set('id', id);
+		u.searchParams.set('lock', '1');
+		return { url: u.toString(), label: 'Cook it!' };
+	  }
+
+	  return null;
+	}
+
+
+    const ret = buildReturnURL(id);
+
+    // ▶️ Bottone (non <a>) e NIENTE link sulla thumb
+    const actionHTML = ret
+      ? `<button class="btn btn-primary open" type="button">${ret.label}</button>`
+      : '';
+
     a.innerHTML = `
       <div class="thumb">
         <img loading="lazy" decoding="async" alt="Doodle #${id}">
@@ -767,16 +873,33 @@ function renderPage(){
       </div>
     `;
 
+    const img = a.querySelector('img');
+    attachImgFallback(img, urls);
+    gridEl.appendChild(a);
 
-  const img = a.querySelector('img');
-  attachImgFallback(img, urls);
-  gridEl.appendChild(a);
-}
+    if (ret) {
+      // Click singolo sul bottone = apri
+      a.querySelector('.open')?.addEventListener('click', () => {
+        const u = new URL(ret.url);
+		location.assign(u.pathname + u.search + u.hash);
 
+      });
+
+      // Doppio-click sulla card = apri (ignora se il doppio-click parte dal bottone)
+      a.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.open')) return;
+        const u = new URL(ret.url);
+		location.assign(u.pathname + u.search + u.hash);
+
+      });
+
+      a.title = 'Double-click to open';
+    }
+  }
 
   emptyEl.style.display = (results.length===0) ? '' : 'none';
-
 }
+
 
 /*** Deep link ***/
 function syncURL(){
@@ -808,7 +931,7 @@ function loadFromURL(){
   }
 
   idSearchEl.value = idFilterRaw || '';
-  parseIdQuery(idFilterRaw);
+  setIdFilterFromSingle(idSearchEl.value);
 }
 
 /*** Reset ***/
@@ -918,21 +1041,25 @@ filtersEl.addEventListener('change', e=>{
 });
 
 
-// ID search (solo numeri, virgole, spazi e trattini)
-idSearchEl.addEventListener('input', ()=>{
+idSearchEl.addEventListener('input', () => {
   const v = idSearchEl.value;
-  let s = v.replace(/\D+/g, ''); // solo cifre
-  // normalizza trattini/virgole ripetuti e spazi multipli
-  s = s.replace(/-{2,}/g, '-').replace(/,{2,}/g, ',').replace(/\s{2,}/g, ' ');
+  const s = v.replace(/\D+/g, '').slice(0, 4); // solo cifre, max 4
+
   if (s !== v) {
     const pos = idSearchEl.selectionStart || s.length;
     idSearchEl.value = s;
-    // prova a mantenere il caret più o meno in posizione
-    try { idSearchEl.setSelectionRange(pos - (v.length - s.length), pos - (v.length - s.length)); } catch {}
+    try {
+      idSearchEl.setSelectionRange(
+        pos - (v.length - s.length),
+        pos - (v.length - s.length)
+      );
+    } catch {}
   }
-  parseIdQuery(idSearchEl.value);
+
+  setIdFilterFromSingle(idSearchEl.value);
   applyFilters();
 });
+
 
 
 // Active chip remove
