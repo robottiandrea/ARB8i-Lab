@@ -215,14 +215,18 @@
     const iPad=/iPad/i.test(ua) || (/Macintosh/i.test(ua) && 'ontouchend' in document);
     return iPhone || Android || iPad;
   }
-  function setShareVisible(visible){
-    if(!shareRow || !shareBtn) return;
-    shareRow.style.display = 'flex';
-    shareRow.style.visibility = visible ? 'visible' : 'hidden';
-    shareRow.style.pointerEvents = visible ? 'auto' : 'none';
-    shareBtn.style.display = isMobileLike() ? '' : 'none';
-    shareBtn.disabled = !visible;
-  }
+	function setShareVisible(visible){
+	  if(!shareRow || !shareBtn || !copyBtn) return;
+	  shareRow.style.display = 'flex';
+	  shareRow.style.visibility = visible ? 'visible' : 'hidden';
+	  shareRow.style.pointerEvents = visible ? 'auto' : 'none';
+
+	  const mobile = isMobileLike();
+	  shareBtn.style.display = mobile ? '' : 'none';   // “Share!” solo su mobile
+	  copyBtn.style.display  = mobile ? 'none' : '';   // nascondi “Download .MP4” su mobile
+	  shareBtn.disabled = !visible;
+	}
+
 
   /* === sizing (canvas/video) + frame === */
   function sizeViewer(){
@@ -330,16 +334,23 @@
     sizeViewer();
   }
 
-  function reevaluateMode(){
-    const prev = IS_NARROW_TOUCH_PHONE;
-    IS_NARROW_TOUCH_PHONE = isNarrowTouchPhone();
-    if (IS_NARROW_TOUCH_PHONE !== prev){
-      if (IS_NARROW_TOUCH_PHONE) applyMobileNaturalMode();
-      else applyDesktopManagedMode();
-    }else{
-      if (!IS_NARROW_TOUCH_PHONE) updateFrameMaxHeight();
-    }
-  }
+	function reevaluateMode(){
+	  const prev = IS_NARROW_TOUCH_PHONE;
+	  IS_NARROW_TOUCH_PHONE = isNarrowTouchPhone();
+
+	  if (IS_NARROW_TOUCH_PHONE !== prev){
+		if (IS_NARROW_TOUCH_PHONE) applyMobileNaturalMode();
+		else applyDesktopManagedMode();
+	  } else {
+		if (!IS_NARROW_TOUCH_PHONE) updateFrameMaxHeight();
+	  }
+
+	  // NEW: riallinea la visibilità dei bottoni (nascondi Download su mobile)
+	  if (shareRow && shareRow.style.visibility === 'visible') {
+		setShareVisible(true);
+	  }
+	}
+
   const debouncedReeval = (()=>{ let to; return ()=>{ clearTimeout(to); to = setTimeout(reevaluateMode, 80); }; })();
 
   window.addEventListener('resize', debouncedReeval, { passive:true });
