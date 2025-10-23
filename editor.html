@@ -353,6 +353,19 @@ let OVERLAYS=null, currentCfg=null;
 let NAME_TO_HEX=null, META=null;
 
 /* ===== Utils ===== */
+async function svgToBitmap(path, W, H){
+  const r = await fetch(`./overlays/${path}`);
+  if (!r.ok) return null;
+  const svg = await r.text();
+  const blob = new Blob([svg], {type:'image/svg+xml'});
+  const url  = URL.createObjectURL(blob);
+  const img  = await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+  const c = document.createElement('canvas'); c.width=W; c.height=H;
+  c.getContext('2d').drawImage(img,0,0,W,H);
+  URL.revokeObjectURL(url);
+  return await createImageBitmap(c);
+}
+
 function setShareVisible(visible){
   const row = document.getElementById('shareRow');
   const btn = document.getElementById('shareX');
@@ -450,10 +463,393 @@ function resolveVariantId(svgRoot, baseId, variant){
   }
   return baseId;
 }
+
+// ===== BEGIN: LAYOUT HELPERS (add) =====
+// SOSTITUISCI la vecchia pickLayoutId con questa
+function pickLayoutId(cfg, row, prefix = 'layout') {
+  // costruiamo una lista ordinata: default -> alt -> alt2 -> alt3 ...
+  const idDefault   = cfg[`${prefix}DefaultId`] || null;
+
+  const options = [];
+  // default sempre per primo (senza "when")
+  if (idDefault) options.push({ id: idDefault, when: null });
+
+  // raccogli tutte le chiavi tipo `${prefix}AltId`, `${prefix}Alt2Id`, ...
+  const entries = Object.keys(cfg)
+    .filter(k => k.startsWith(`${prefix}Alt`) && k.endsWith('Id'))
+    .map(k => {
+      const base = k.slice(0, -2); // toglie "Id"
+      const whenKey = `${base}When`;
+      return { id: cfg[k], when: cfg[whenKey] };
+    })
+    // mantieni l'ordine Alt, Alt2, Alt3...
+    .sort((a, b) => {
+      const ai = (a.id && a.id.includes('Alt')) ? a.id : '';
+      const bi = (b.id && b.id.includes('Alt')) ? b.id : '';
+      return ai.localeCompare(bi, 'en', { numeric: true });
+    })
+    .filter(o => !!o.id);
+
+  // unisci: default (se c'è) + alt/alt2/alt3...
+  const all = options.concat(entries);
+
+  // cerca la prima ALT con needles che matchano
+  for (const opt of all) {
+    if (!opt.when || !Array.isArray(opt.when) || opt.when.length === 0) continue;
+    if (rowHasAnyNeedle(row, opt.when)) return opt.id;
+  }
+  // se nessuna ALT matcha, prendi il default (se esiste), altrimenti la prima che c’è
+  return idDefault || (entries[0]?.id ?? null);
+}
+
+function showOnlyLayoutGroup(svgRoot, ids, chosenId){
+  ids.filter(Boolean).forEach(id=>{
+    const el = svgRoot.querySelector('#' + cssEscapeCompat(id));
+    if (!el) return;
+    el.style.setProperty('display', id === chosenId ? '' : 'none', 'important');
+  });
+}
+
+
+function pickMaskLayersForRow(row) {
+  const del = [];
+  const keep = [];
+
+  // Helpers coerenti
+  const isBody     = (v) => rowHasTrait(row, 'body', v);
+  const isHair     = (v) => rowHasTrait(row, 'hair', v);
+  const isHead     = (v) => rowHasTrait(row, 'head', v);
+  const isFace     = (v) => rowHasTrait(row, 'face', v);
+  const isPiercing = (v) => rowHasTrait(row, 'piercing', v);
+
+  // === logica pre-esistente ===
+  const isSkelly      = isBody('skelly');
+  const isHoodieBody  = isBody('hoodie');
+  const isCatBody     = isBody('cat');
+  const isCoffeeHead = isHead('coffee');
+  const isStrawFace  = isFace('straw');
+  const isPoopieHair = isHair('poopie');
+  const isHaloHair   = isHair('halo');
+  const isBalloon    = isHead('balloon');
+  
+
+  if (isCatBody) del.push('cat_delete');
+
+  if (isSkelly) del.push('skelly_delete');
+
+  if (isCoffeeHead) {
+    if (isHoodieBody) del.push('coffee_hoodie_delete');
+    else              del.push('coffee_delete');
+  }
+
+  if (isStrawFace) keep.push('straw_preserve');
+
+  // qui la logica richiesta
+  if (isPoopieHair) {
+    keep.push(isSkelly ? 'fly_skelly_preserve' : 'fly_preserve');
+  }
+
+  // HALO: se hair=halo e body=cat, preserva versione speciale; altrimenti logica standard
+  if (isHaloHair) {
+    if (isCatBody) {
+      keep.push('halo_cat_preserve');  // ⬅️ nuovo caso speciale
+    } else {
+      keep.push('halo_preserve');
+      del.push('halo_delete');
+    }
+  }
+
+  if (isBalloon) del.push('balloon_delete');
+
+  // === Piercing: hoop (tabella regole) ===
+  if (isPiercing('hoop')) {
+    // Predicati leggibili
+    const isHoodie      = () => isBody('hoodie');
+    const isPuffer      = () => isBody('puffer');
+
+    const isMullet      = () => isHair('mullet');
+    const isLong        = () => isHair('long');
+    const isMessy       = () => isHair('messy');
+
+    const isTurtleneck  = () => isBody('turtleneck');
+    const isSatchel     = () => isBody('satchel');     // accorpato con turtleneck per hoop_tot_delete
+    const isBlazer      = () => isBody('blazer');
+    const isCollar      = () => isBody('collar');
+    const isFleece      = () => isBody('fleece');
+    const isChain       = () => isBody('chain');
+    const isHoloSweater = () => isBody('holographic sweater');
+    const isJacket      = () => isBody('jacket');
+
+    // Regole in ordine di priorità (la prima che matcha vince)
+    const rules = [
+      { when: isHoodie,                         action: null }, // non bucare
+      { when: isPuffer,                         action: null }, // non bucare
+      { when: isMullet,                         action: null }, // non bucare
+      { when: isLong,                           action: null }, // non bucare
+      { when: isMessy,                          action: () => del.push('hoop_messy_delete') },
+      { when: () => isTurtleneck() || isSatchel(), action: () => del.push('hoop_tot_delete') },
+      { when: isBlazer,                         action: () => del.push('hoop_blazer_delete') },
+      { when: isCollar,                         action: () => del.push('hoop_collar_delete') },
+      { when: isFleece,                         action: () => del.push('hoop_fleece_delete') },
+      { when: () => isChain() || isHoloSweater(), action: () => del.push('hoop_chain_delete') },
+      { when: isJacket,                         action: () => del.push('hoop_jacket_delete') },
+      // default: non bucare (nessuna regola matcha)
+    ];
+
+    for (const rule of rules) {
+      if (rule.when()) {
+        if (rule.action) rule.action(); // null = noop
+        break;
+      }
+    }
+  }
+
+  return { deleteLayers: del, preserveLayers: keep };
+}
+
+
+
+
+async function buildErasePreserveBitmaps(W, H, row){
+  const svg = await loadOverlayMaskSvg();
+
+  // canvases
+  const cDel   = document.createElement('canvas'); cDel.width=W;  cDel.height=H;
+  const gDel   = cDel.getContext('2d'); gDel.clearRect(0,0,W,H);
+
+  const cKeep  = document.createElement('canvas'); cKeep.width=W; cKeep.height=H;
+  const gKeep  = cKeep.getContext('2d'); gKeep.clearRect(0,0,W,H);
+
+  const { deleteLayers, preserveLayers } = pickMaskLayersForRow(row);
+
+  for (const id of deleteLayers)  await drawOnlyLayerTo(gDel,  svg, id, W, H);
+  for (const id of preserveLayers) await drawOnlyLayerTo(gKeep, svg, id, W, H);
+
+  const eraseBitmap     = deleteLayers.length  ? await createImageBitmap(cDel)  : null;
+  const preserveBitmap  = preserveLayers.length ? await createImageBitmap(cKeep) : null;
+
+  return { eraseBitmap, preserveBitmap };
+}
+
+
+
+// ===== END: LAYOUT HELPERS (add) =====
+
 // **FINE INSERIMENTO 2 – helpers varianti**
+  // --- Helper: carica un SVG dal filesystem degli overlay e prepara l'elemento <svg> ---
+  async function parseSvgFromFile(path){
+    const r = await fetch(`./overlays/${path}`);
+    if (!r.ok) throw new Error(`SVG not found: ${path}`);
+    const txt = await r.text();
+    let d = new DOMParser().parseFromString(txt, 'image/svg+xml');
+    let s = (d.documentElement?.tagName?.toLowerCase() === 'svg') ? d.documentElement : d.querySelector('svg');
+    if (!s) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = txt.replace(/^\s*<\?xml[^>]*\?>/, '').trim();
+      s = tmp.querySelector('svg');
+    }
+    if (!s) throw new Error('SVG missing <svg>');
+    s.removeAttribute('width'); s.removeAttribute('height');
+    s.setAttribute('viewBox', s.getAttribute('viewBox') || '0 0 1800 1800');
+    s.setAttribute('preserveAspectRatio','xMidYMid meet');
+    return s;
+  }
+
+  // --- Helper: disegna un <svg> (con eventuale switch di gruppo) sul ctx canvas ---
+  async function drawSvgOnCtx(ctx, W, H, svgNode, layoutId, groupIds = []){
+    if (groupIds.length && layoutId) showOnlyLayoutGroup(svgNode, groupIds, layoutId);
+    const serialized = new XMLSerializer().serializeToString(svgNode);
+    const blob = new Blob([serialized], {type:'image/svg+xml'});
+    const url  = URL.createObjectURL(blob);
+    await new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => { ctx.drawImage(img, 0, 0, W, H); URL.revokeObjectURL(url); res(); };
+      img.onerror = rej;
+      img.src = url;
+    });
+  }
+// === MASK HELPERS ===
+async function loadOverlayMaskSvg(){
+  const r = await fetch('./overlays/masks/Overlay_mask.svg');
+  if(!r.ok) throw new Error('Overlay_mask.svg not found');
+  const txt = await r.text();
+  const doc = new DOMParser().parseFromString(txt, 'image/svg+xml');
+  let svg = (doc.documentElement?.tagName?.toLowerCase()==='svg') ? doc.documentElement : doc.querySelector('svg');
+  if(!svg) throw new Error('Overlay_mask: missing <svg>');
+  svg.removeAttribute('width'); svg.removeAttribute('height');
+  svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '0 0 1800 1800');
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+  return svg;
+}
+
+async function drawOnlyLayerTo(ctx, baseSvgNode, layerId, W, H){
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = baseSvgNode.cloneNode(true);
+
+  // Mantieni <style> e <defs> attivi (servono per .st0 ecc.)
+  svg.querySelectorAll('*').forEach(el => {
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'style' || tag === 'defs') return;
+    el.style.setProperty('display','none','important');
+  });
+
+  // Mostra solo il layer target & discendenti
+  const esc = (window.CSS && CSS.escape) ? CSS.escape(layerId) : layerId.replace(/[^a-zA-Z0-9_-]/g,'\\$&');
+  const target = svg.querySelector('#'+esc);
+  if (target) {
+    target.style.setProperty('display','', 'important');
+    target.querySelectorAll('*').forEach(ch => ch.style.setProperty('display','', 'important'));
+
+    // Hardening: fill pieno, niente stroke/opacity (qualunque colore va bene)
+    const forceFill = (el) => {
+      el.setAttribute('fill', '#000');
+      if (el.hasAttribute('stroke'))  el.removeAttribute('stroke');
+      if (el.hasAttribute('opacity')) el.removeAttribute('opacity');
+      if (el.style?.setProperty) el.style.setProperty('fill', '#000', 'important');
+    };
+    forceFill(target);
+    target.querySelectorAll('*').forEach(forceFill);
+  }
+
+  // Rasterizza
+  const ser = new XMLSerializer().serializeToString(svg);
+  const blob = new Blob([ser], {type:'image/svg+xml'});
+  const url  = URL.createObjectURL(blob);
+  await new Promise((res,rej)=>{
+    const i=new Image();
+    i.onload=()=>{ ctx.drawImage(i,0,0,W,H); URL.revokeObjectURL(url); res(); };
+    i.onerror=rej; i.src=url;
+  });
+}
+
+
+
+// Cache degli SVG per non ricaricarli ogni volta
+const _HOLE_SVG_CACHE = new Map();
+
+async function loadHoleSvg(svgPath){
+  if (_HOLE_SVG_CACHE.has(svgPath)) return _HOLE_SVG_CACHE.get(svgPath);
+  const r = await fetch(svgPath);
+  if (!r.ok) throw new Error('Hole SVG not found: ' + svgPath);
+  const txt = await r.text();
+  const doc = new DOMParser().parseFromString(txt, 'image/svg+xml');
+  let svg = (doc.documentElement?.tagName?.toLowerCase()==='svg') ? doc.documentElement : doc.querySelector('svg');
+  if (!svg) throw new Error('Hole SVG missing <svg>');
+  svg.removeAttribute('width'); svg.removeAttribute('height');
+  svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '0 0 1800 1800');
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+  _HOLE_SVG_CACHE.set(svgPath, svg);
+  return svg;
+}
+
+// Legge il valore di un tratto (face/hair/body...) e lo normalizza
+function getTraitValue(row, key){
+  const k = String(key||'').toLowerCase();
+  if (Array.isArray(row?.attributes)){
+    for (const a of row.attributes){
+      const t = (a?.trait_type || a?.traitType || a?.type || '').toString().toLowerCase();
+      if (!t.includes(k)) continue;
+      const v = (a?.value || '').toString();
+      if (v) return v;
+    }
+  }
+  // fallback su campi flattati
+  for (const [kk,v] of Object.entries(row||{})){
+    if (typeof v !== 'string') continue;
+    if (kk.toLowerCase().includes(k)) return v;
+  }
+  return null;
+}
+
+/* ===== HOLE MASKS (config data-driven) ===== */
+
+// opzionale: registry per riuso tra carte diverse
+const HOLE_MASKS_BASE = {
+  Catrinas: {
+    svgPath: './overlays/masks/Overlay_mask_Catrinas.svg',
+    // stopOnFirst: true,
+    rules: {
+	  body: [
+        { needles: ['cat'], layer: 'cat_hole' },
+      ],
+      face: [
+        { needles: ['sunglasses'], layer: 'sunglasses_hole' },
+        { needles: ['note'],       layer: 'note_hole' },
+        { needles: ['cobain'],     layer: 'cobain_hole' },
+        { needles: ['designer'],   layer: 'designer_hole' },
+        { needles: ['60s'],        layer: '60s_hole' },
+        { needles: ['3d'],         layer: '3d_hole' },
+        { needles: ['love'],       layer: 'love_hole' },
+      ],
+      
+    }
+  }
+};
+
+
+
+// prende la config dai campi del JSON della card
+function resolveHoleMaskConf(cfg) {
+  if (!cfg) return null;
+  if (cfg.holeMask && cfg.holeMask.svgPath) return cfg.holeMask;           // inline
+  if (cfg.holeMaskRef && HOLE_MASKS_BASE[cfg.holeMaskRef]) return HOLE_MASKS_BASE[cfg.holeMaskRef]; // ref
+  return null;
+}
+
+// NUOVO FORMATO SOLO: conf = { svgPath, stopOnFirst?, rules:{ face:[...], body:[...], hair:[...], ... } }
+function pickHoleMasksForRow(row, conf){
+  if (!conf || !conf.rules || Array.isArray(conf.rules)) {
+    return { svgPath: conf?.svgPath || null, layerIds: [] };
+  }
+
+  const layerIds = [];
+  const stopOnFirst = !!conf.stopOnFirst;
+
+  for (const [traitKey, rules] of Object.entries(conf.rules)) {
+    if (!Array.isArray(rules)) continue;
+
+    for (const rule of rules) {
+      const needles = (rule.needles || []).map(String);
+      const hit = needles.some(n => rowHasTrait(row, traitKey, n)); // <- STRICT per trait
+      if (hit && rule.layer) {
+        layerIds.push(rule.layer);
+        if (stopOnFirst) return { svgPath: conf.svgPath, layerIds };
+      }
+    }
+  }
+
+  return { svgPath: conf.svgPath, layerIds };
+}
+
+
+
+// Applica i fori al DOODLE (ctx = contesto del doodle, non quello principale)
+async function applyHoleMasksForCard(ctx, W, H, row, holeConf){
+  const { svgPath, layerIds } = pickHoleMasksForRow(row, holeConf);
+  console.log('[holes]', {
+	  svgPath, layerIds,
+	  body: getTraitValue(row,'body'),
+	  face: getTraitValue(row,'face')
+	});
+  if (!svgPath || !layerIds.length) return;
+
+  const holeSvg = await loadHoleSvg(svgPath);
+  const tmp = document.createElement('canvas'); tmp.width=W; tmp.height=H;
+  const g = tmp.getContext('2d');
+
+  for (const id of layerIds){
+    if (!holeSvg.getElementById(id)) continue;
+    await drawOnlyLayerTo(g, holeSvg, id, W, H);
+  }
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.drawImage(tmp, 0, 0, W, H);
+  ctx.restore();
+}
 
 /* ===== Compose: base + overlay → dataURL ===== */
-async function composeDataUrl(baseBlob, cfg, sleeveSpec, skinSpec, variant){
+async function composeDataUrl(baseBlob, cfg, sleeveSpec, skinSpec, variant, layoutId, row){
   const r = await fetch(`./overlays/${cfg.file}`);
   if(!r.ok) throw new Error(`Overlay not found: ${cfg.file}`);
   const svgText = await r.text();
@@ -475,6 +871,18 @@ async function composeDataUrl(baseBlob, cfg, sleeveSpec, skinSpec, variant){
   svg.removeAttribute('width'); svg.removeAttribute('height');
   svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '0 0 1800 1800');
   svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+// ----- BEGIN: layout switch (add) -----
+const _layoutIds = [
+  cfg.layoutDefaultId,
+  ...(Object.keys(currentCfg || {})
+      .filter(k => k.startsWith('layoutAlt') && k.endsWith('Id'))
+      .map(k => currentCfg[k]))
+].filter(Boolean);
+
+if (_layoutIds.length && layoutId) {
+  showOnlyLayoutGroup(svg, _layoutIds, layoutId);
+}
+// ----- END: layout switch (add) -----
 
 // Attiva la variante solo se l'item dichiara variants e se la variante è richiesta
 const declared = Array.isArray(cfg.variants) ? cfg.variants.map(v=>String(v).toLowerCase()) : [];
@@ -569,28 +977,79 @@ const skinId   = resolveVariantId(svg, baseSkinId,   activeVariant);
   }
 
 
-  // === Applica skin/sleeve ===
-  if(sleeveSpec) applySpecToTarget(svg, sleeveId, sleeveSpec, DEFAULT_ANGLE.sleeve);
-  if(skinSpec)   applySpecToTarget(svg, skinId,   skinSpec,   DEFAULT_ANGLE.skin);
+	// ===== BEGIN: recolor block (patched) =====
+	if (!cfg.noRecolor) {
+	  // Questi ID (skin/sleeve) servono per applicare i colori a livello giusto (con o senza suffisso)
+	  const baseSleeveId = cfg.sleeveId || 'Sleeve_fill';
+	  const baseSkinId   = cfg.skinId   || 'Skin_fill';
+	  const sleeveId = resolveVariantId(svg, baseSleeveId, activeVariant);
+	  const skinId   = resolveVariantId(svg, baseSkinId,   activeVariant);
 
-  // === Compose su canvas ===
-  const baseUrl = URL.createObjectURL(baseBlob);
-  const baseImg = await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=baseUrl; });
-  const W = baseImg.naturalWidth, H = baseImg.naturalHeight;
+	  if(sleeveSpec) applySpecToTarget(svg, sleeveId, sleeveSpec, DEFAULT_ANGLE.sleeve);
+	  if(skinSpec)   applySpecToTarget(svg, skinId,   skinSpec,   DEFAULT_ANGLE.skin);
+	}
+	// ===== END: recolor block (patched) =====
 
-  const canvas = document.createElement('canvas'); canvas.width=W; canvas.height=H;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(baseImg,0,0,W,H);
-  URL.revokeObjectURL(baseUrl);
 
-  const svgSerialized = new XMLSerializer().serializeToString(svg);
-  const svgBlob = new Blob([svgSerialized], {type:'image/svg+xml'});
-  const svgUrl = URL.createObjectURL(svgBlob);
-  await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>{ ctx.drawImage(i,0,0,W,H); URL.revokeObjectURL(svgUrl); res(); }; i.onerror=rej; i.src=svgUrl; });
+// === Compose su canvas ===
+const baseUrl = URL.createObjectURL(baseBlob);
+const baseImg = await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=baseUrl; });
+const W = baseImg.naturalWidth, H = baseImg.naturalHeight;
 
-  return canvas.toDataURL('image/png');
+const canvas = document.createElement('canvas'); canvas.width=W; canvas.height=H;
+const ctx = canvas.getContext('2d');
+
+// 0) Background (se dichiarato nella card)
+if (cfg.bgFile) {
+  try {
+    const bgSvg = await parseSvgFromFile(cfg.bgFile);
+
+    const _bgLayoutIds = [
+      cfg.bgLayoutDefaultId,
+      ...(Object.keys(cfg || {})
+        .filter(k => k.startsWith('bgLayoutAlt') && k.endsWith('Id'))
+        .map(k => cfg[k]))
+    ].filter(Boolean);
+
+    // ✅ prefisso giusto e variabile giusta
+    const bgLayoutId = pickLayoutId(cfg, row, 'bgLayout');
+
+    await drawSvgOnCtx(ctx, W, H, bgSvg, bgLayoutId, _bgLayoutIds);
+  } catch (e) {
+    console.warn('Background draw skipped:', e);
+  }
 }
 
+// 1) Doodle su canvas intermedio
+const doodCanvas = document.createElement('canvas');
+doodCanvas.width = W; doodCanvas.height = H;
+const doodCtx = doodCanvas.getContext('2d');
+doodCtx.drawImage(baseImg, 0, 0, W, H);
+URL.revokeObjectURL(baseUrl);
+
+// 1.5) HOLE MASKS data-driven dalla card
+try {
+  const holeConf = resolveHoleMaskConf(currentCfg);
+  if (holeConf) {
+    await applyHoleMasksForCard(doodCtx, W, H, row, holeConf);
+  }
+} catch (e) {
+  console.warn('applyHoleMasksForCard skipped:', e);
+}
+
+
+// 2) Disegna il doodle (già bucato) sopra lo sfondo
+ctx.drawImage(doodCanvas, 0, 0, W, H);
+
+// 3) Overlay in cima
+const svgSerialized = new XMLSerializer().serializeToString(svg);
+const svgBlob = new Blob([svgSerialized], {type:'image/svg+xml'});
+const svgUrl = URL.createObjectURL(svgBlob);
+await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>{ ctx.drawImage(i,0,0,W,H); URL.revokeObjectURL(svgUrl); res(); }; i.onerror=rej; i.src=svgUrl; });
+
+return canvas.toDataURL('image/png');
+
+}
 
 /* ===== OOPS: match tratti SOLO nei value di attributes ===== */
 function rowHasAnyNeedle(row, needles){
@@ -618,7 +1077,30 @@ function rowHasAnyNeedle(row, needles){
   return keys.some(k => vals.some(v => v.includes(k)));
 }
 
-// ➜ sostituisci TUTTO il blocco updateFrameMaxHeight + debounce + listeners con questo
+// Match parziale su un trait specifico: es. rowHasTrait(row,'body','hoodie')
+function rowHasTrait(row, traitKey, needle){
+  if(!row || !needle) return false;
+  const key = String(traitKey||'').trim().toLowerCase();
+  const ndl = String(needle||'').trim().toLowerCase();
+
+  // formato { attributes: [ {trait_type:'Body', value:'Green Hoodie'}, ... ] }
+  if (Array.isArray(row.attributes)){
+    for (const a of row.attributes){
+      const t = (a?.trait_type || a?.traitType || a?.type || '').toString().toLowerCase();
+      const v = (a?.value || '').toString().toLowerCase();
+      if (!t || !v) continue;
+      if (t.includes(key) && v.includes(ndl)) return true; // ⬅️ match PARZIALE
+    }
+  }
+
+  // fallback: se la tua META flattava i campi (es. row.Body = 'Green Hoodie')
+  for (const [k,v] of Object.entries(row)){
+    if (typeof v !== 'string') continue;
+    if (k.toLowerCase().includes(key) && v.toLowerCase().includes(ndl)) return true;
+  }
+  return false;
+}
+
 
 function getViewportHeight() {
   // Usa l’altezza della viewport “visibile” se disponibile (iOS Safari)
@@ -701,6 +1183,8 @@ document.getElementById('composite')?.addEventListener('load', () => {
   
 /* ===== Pipeline: on-chain → IPFS → compose ===== */
 async function openImage(){
+  console.log('[openImage] called');
+
   setStatus('Cooking…');
   showCenterPop('Cooking…');
   setShareVisible(false);
@@ -722,17 +1206,62 @@ async function openImage(){
 
     let baseBlob = null;
     const imageUri = meta.image || meta.image_url || meta.imageIpfs;
-    if(imageUri) baseBlob = await fetchBlobAny(ipfsUrls(imageUri));
-    if(!baseBlob){
-      for(const p of [`./doodles/${id}.png`, `./${id}.png`]){ try{ const rr=await fetch(p); if(rr.ok){ baseBlob=await rr.blob(); break; } }catch{} }
-      if(!baseBlob) throw new Error('No Doodle image found');
+    if (imageUri) baseBlob = await fetchBlobAny(ipfsUrls(imageUri));
+    if (!baseBlob) {
+      for (const p of [`./doodles/${id}.png`, `./${id}.png`]) {
+        try { const rr = await fetch(p); if (rr.ok) { baseBlob = await rr.blob(); break; } } catch {}
+      }
+      if (!baseBlob) throw new Error('No Doodle image found');
     }
 
+    // <<<--- SPOSTATO QUI (prima di usare row in KO)
     const row = META[id] || {};
+
+    // --- OPTIONAL: scontorna il Doodle se la card lo chiede ---
+    if (currentCfg?.useKnockout) {
+	  try {
+			const koMod = await import('./scripts/knockout.js?v=overlayMask2'); // <-- cambia versione per bust-cache
+			const imgBitmap = await createImageBitmap(baseBlob);
+
+			// costruisci erase/preserve da Overlay_mask.svg
+			let eraseBitmap = null, preserveBitmap = null;
+			const r = await buildErasePreserveBitmaps(imgBitmap.width, imgBitmap.height, row);
+			eraseBitmap    = r.eraseBitmap;
+			preserveBitmap = r.preserveBitmap;
+
+			const KO_OPTS = {
+			  ink: 64,
+			  gap: -1,
+			  edge: 26,
+			  edge_dilate: 0,
+			  edge_pad: 20,
+			  seam: 1,
+			  keep_radius: 8,
+			  peel_iters: 8,
+			  min_island_area: 250,
+			  feather: 1,
+			  erase_mask: eraseBitmap,
+			  erase_keep_ink: true,
+			  preserve_mask: preserveBitmap
+			};
+
+
+						const { fullCanvas } = await koMod.knockoutProcess(imgBitmap, KO_OPTS);
+						baseBlob = await new Promise(res => fullCanvas.toBlob(res, 'image/png'));
+
+				  } catch (e) {
+					console.warn('Knockout failed or unavailable, using original base image.', e);
+				  }
+				}
+
+
+    // (ora row ESISTE già)
     const nameSkin   = (row.Skin_colors   || row.skin_colors   || row.Skin   || '').trim();
     const nameSleeve = (row.Sleeve_colors || row.sleeve_colors || row.Sleeve || '').trim();
-    const hexSkin   = NAME_TO_HEX[nameSkin];
-    const hexSleeve = NAME_TO_HEX[nameSleeve];
+    const hexSkin    = NAME_TO_HEX[nameSkin];
+    const hexSleeve  = NAME_TO_HEX[nameSleeve];
+
+
 	
 	// **INIZIO INSERIMENTO 3 – scelta variante**
 	let variant = null; // default-only
@@ -746,7 +1275,20 @@ async function openImage(){
 	// **FINE INSERIMENTO 3 – scelta variante**
 
 
-    const dataUrl = await composeDataUrl(baseBlob, currentCfg, hexSleeve, hexSkin, variant);
+    // ----- BEGIN: choose layout + call compose (patched) -----
+	const layoutId   = pickLayoutId(currentCfg, row);
+	const sleeveSpec = currentCfg.noRecolor ? null : hexSleeve;
+	const skinSpec   = currentCfg.noRecolor ? null : hexSkin;
+	console.log('[compose-call]', {
+	  cfgId: currentCfg?.id,
+	  body: (getTraitValue(row,'body')||'').toString(),  // <- body
+	  sleeveSpec, skinSpec, variant, layoutId
+	});
+
+
+	const dataUrl = await composeDataUrl(baseBlob, currentCfg, sleeveSpec, skinSpec, variant, layoutId, row);
+	// ----- END: choose layout + call compose (patched) -----
+
     imgEl.src = dataUrl;
     hideCenterPop();
 
@@ -853,6 +1395,9 @@ function applyBadge(badgeEl, cfg){
       || (OVERLAYS.items[0] && OVERLAYS.items[0].id);
 
     currentCfg = getCfg(ovId) || OVERLAYS.items[0];
+	console.log('[init] ovId from URL/localStorage/default =', ovId);
+    console.log('[init] currentCfg.id =', currentCfg?.id, currentCfg);
+
     if (currentCfg?.id) localStorage.setItem('lastOverlay', currentCfg.id);
 
     // Header
