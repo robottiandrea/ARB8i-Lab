@@ -165,7 +165,7 @@
       "oopsTraits": ["balloon", "popsicle", "cat"],
       "oopsMessage": "Pretty sure your dood doesn’t have any hands!"
     },
-	 {
+	{
       "id": "DOODLEJUICE",
       "name": "DOODLEJUICE",
       "author": "ⓜⓘⓢⓢⓘⓕⓤⓢⓘⓣ🅰️ ORIGIN🅰️L",
@@ -273,6 +273,7 @@
     }
   ]
 }
+
 
 
 
