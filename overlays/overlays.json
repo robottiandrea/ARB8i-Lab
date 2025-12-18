@@ -37,8 +37,7 @@
       "bgFile": "Overlay_WednesdayWindow.svg",
       "bgLayoutDefaultId": "Overlay_WednesdayWindow",
       "bgLayoutAltId": null,
-      "useKnockout": true,
-	  "holeMaskRef": "Catrinas"
+      "useKnockout": true
     },
 	{
       "id": "Catrinas",
@@ -274,4 +273,5 @@
     }
   ]
 }
+
 
